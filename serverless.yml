@@ -1,0 +1,120 @@
+plugins:
+  - serverless-webpack
+  - serverless-offline
+  - serverless-dotenv-plugin
+
+service: search-api
+
+custom:
+  webpack:
+    webpackConfig: 'webpack.config.js' # Name of webpack configuration file
+    includeModules: true # Node modules configuration for packaging
+    packager: 'npm' # Packager that will be used to package your external modules
+    excludeFiles:
+      - .github/**
+      - .vscode/**
+      - .eslintignore
+      - .eslintrc.json
+      - .nvmrc
+      - package-lock.json
+      - package.json
+      - prettier.config.js
+      - README.md
+      - test/**
+      - docs/**
+      - .dependabot/**
+
+provider:
+  name: aws
+  runtime: nodejs16.x
+  stage: ${opt:stage,'dev'}
+  region: ${opt:region,'us-east-1'}
+functions:
+  function:
+    handler: lambda.handler
+    name: ${self:service}
+    role: LambdaElasticSearchAccessRole
+    timeout: 3
+    dependsOn:
+      - ElasticsearchDomain
+    events:
+      - http:
+          path: 'search'
+          method: GET  
+      - http:
+          path: 'search'
+          method: OPTIONS 
+      - http:
+          path: 'build'
+          method: POST  
+      - http:
+          path: 'build'
+          method: OPTIONS
+
+  build:
+    handler: lambda.build
+    name: ${self:service}-build
+    role: LambdaElasticSearchAccessRole
+    timeout: 30
+  reset:
+    handler: lambda.reset
+    name: ${self:service}-reset
+    role: LambdaElasticSearchAccessRole
+    timeout: 3
+  harvest:
+    handler: lambda.harvest
+    name: ${self:service}-harvest
+    role: LambdaElasticSearchAccessRole
+    timeout: 30    
+resources:
+  Resources:
+    LambdaElasticSearchAccessRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: lambda.amazonaws.com
+              Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole          
+    ElasticsearchDomain:
+      Type: AWS::Elasticsearch::Domain
+      Properties:
+        DomainName: ${self:service}
+        ElasticsearchVersion: '7.10'
+        ElasticsearchClusterConfig:
+          InstanceCount: '1'
+          InstanceType: 't3.small.elasticsearch'
+        EBSOptions:
+          EBSEnabled: true
+          VolumeSize: '20'
+          VolumeType: 'gp2'
+        AccessPolicies:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: 'Allow'
+              Principal:
+                AWS: !GetAtt LambdaElasticSearchAccessRole.Arn
+              Action: 'es:ESHttp*'
+              Resource:
+                - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${self:service}/*'
+        AdvancedOptions:
+          rest.action.multi.allow_explicit_index: true          
+package:
+  exclude:
+    - .github/**
+    - .vscode/**
+    - .eslintignore
+    - .eslintrc.json
+    - .nvmrc
+    - package-lock.json
+    - package.json
+    - prettier.config.js
+    - README.md
+    - test/**
+    - docs/**
+    - node_modules/aws-sdk/**
+    - .dependabot/**
